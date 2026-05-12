@@ -43,56 +43,10 @@ def extract_block(code: str) -> Optional[str]:
     return "\n".join(content_lines)
 
 
-def replace_block(code: str, new_block: str) -> str:
-    """Replace the content between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END with new_block.
+def replace_block(code: str, new_code: str) -> str:
+    """Replace the content with new generated code.
 
-    Preserves the marker lines and the code outside the block.
+    The LLM generates the full program (EVOLVE-BLOCK markers are
+    informational). Returns the new code as-is.
     """
-    lines = code.splitlines()
-    start_idx = None
-    end_idx = None
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if EVOLVE_BLOCK_START in stripped or stripped == ALT_START:
-            start_idx = i
-        if EVOLVE_BLOCK_END in stripped or stripped == ALT_END:
-            end_idx = i
-
-    if start_idx is None or end_idx is None:
-        raise ValueError("EVOLVE-BLOCK markers not found in code template")
-
-    # Reconstruct: before start marker + start marker + new block + end marker + after end marker
-    before = lines[: start_idx + 1]
-    after = lines[end_idx:]
-    indent = _detect_indent(lines, start_idx + 1)
-    indented_block = _indent_block(new_block.strip(), indent)
-
-    return "\n".join(before) + "\n" + indented_block + "\n" + "\n".join(after)
-
-
-def _detect_indent(lines: list[str], idx: int) -> str:
-    """Detect the indentation of the line at idx (first line inside block)."""
-    if idx < len(lines):
-        stripped = lines[idx].lstrip()
-        indent = lines[idx][: len(lines[idx]) - len(stripped)]
-        return indent
-    return ""
-
-
-def _indent_block(block: str, indent: str) -> str:
-    """Normalise then add indentation to each line of a block.
-
-    Strips ALL leading whitespace from each line, then adds the target
-    indentation. This prevents the LLM's own indentation from compounding.
-    For simple function bodies (all statements at one level) this is correct;
-    nested blocks may need a more nuanced approach in future.
-    """
-    if not indent:
-        return block
-    lines = block.splitlines()
-    # Remove ALL leading whitespace from every non-empty line
-    stripped = [ln.lstrip() if ln.strip() else "" for ln in lines]
-    # Add our target indentation
-    indented = [indent + ln if ln.strip() else "" for ln in stripped]
-    return "\n".join(indented)
+    return new_code

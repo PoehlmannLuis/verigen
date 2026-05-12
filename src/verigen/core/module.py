@@ -61,13 +61,11 @@ class VerifiableCodeGen(dspy.Module):
             task_description=task.description,
             program_template=template,
         )
-        initial_block = output.block_implementation.strip()
-        initial_code = replace_block(template, initial_block)
+        best_code = output.generated_code.strip()
         elapsed = (time.perf_counter() - t0) * 1000
 
-        best_block = initial_block
-        best_code = initial_code
         best_result = task.evaluate_fn(best_code)
+        best_block = extract_block(best_code) or best_code
 
         self.trace.record(TraceEntry(
             iteration=0,
@@ -87,25 +85,23 @@ class VerifiableCodeGen(dspy.Module):
             mutation = self.improver(
                 task_description=task.description,
                 program_context=template,
-                current_block_code=best_block,
+                current_code=best_code,
                 evaluation_feedback=_format_feedback(best_result, i),
             )
 
-            candidate_block = mutation.improved_block_code.strip()
+            candidate_code = mutation.generated_code.strip()
             candidate_rationale = mutation.change_rationale.strip()
 
-            if not candidate_block:
-                candidate_block = best_block  # skip empty mutations
+            if not candidate_code:
+                candidate_code = best_code  # skip empty generations
 
-            candidate_code = replace_block(template, candidate_block)
             candidate_result = task.evaluate_fn(candidate_code)
-
             elapsed = (time.perf_counter() - t0) * 1000
 
             self.trace.record(TraceEntry(
                 iteration=i + 1,
                 phase="mutate",
-                block_code=candidate_block,
+                block_code=extract_block(candidate_code) or candidate_code,
                 score=candidate_result.score,
                 passed=candidate_result.passed,
                 feedback=candidate_result.feedback,
@@ -116,8 +112,8 @@ class VerifiableCodeGen(dspy.Module):
 
             # Keep candidate if it passes and improves score
             if candidate_result.passed and candidate_result.score > best_result.score:
-                best_block = candidate_block
                 best_code = candidate_code
+                best_block = extract_block(best_code) or best_code
                 best_result = candidate_result
 
             # Early stop at threshold

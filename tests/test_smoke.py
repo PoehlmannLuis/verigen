@@ -51,17 +51,12 @@ def test_extract_block():
 
 
 def test_replace_block():
-    """Replace code between EVOLVE-BLOCK markers."""
-    new_block = '''cleaned = ""
-    for c in s.lower():
-        if c.isalnum():
-            cleaned += c
-    return cleaned == cleaned[::-1]'''
-    result = replace_block(SAMPLE_TEMPLATE, new_block)
-    assert "# EVOLVE-BLOCK-START" in result
-    assert "# EVOLVE-BLOCK-END" in result
-    assert "cleaned = \"\"" in result
-    assert "raise NotImplementedError()" not in result
+    """Replace returns new code as-is (LLM writes full program)."""
+    new_code = '''def is_palindrome(s):
+    s = ''.join(c.lower() for c in s if c.isalnum())
+    return s == s[::-1]'''
+    result = replace_block(SAMPLE_TEMPLATE, new_code)
+    assert result == new_code
 
 
 def test_evaluation_result_construction():
@@ -96,15 +91,15 @@ def test_evaluate_in_sandbox():
         assert result.passed is False, f"Expected passed=False, got {result}"
 
 
-def test_replace_block_preserves_indentation():
-    """The replaced block should match the original indentation level."""
+def test_replace_block_passthrough():
+    """replace_block returns the new code as-is (passthrough)."""
     template = """def foo():
     # EVOLVE-BLOCK-START
     pass
     # EVOLVE-BLOCK-END
 """
-    new_block = "return 42"
-    result = replace_block(template, new_block)
-    lines = result.splitlines()
-    # The return statement should be indented
-    assert "    return 42" in result, f"Expected indented return, got:\n{result}"
+    result = replace_block(template, template)
+    assert result == template
+    result2 = replace_block(template, "return 42")
+    assert result2 == "return 42"
+    assert "    return 42" not in result2
