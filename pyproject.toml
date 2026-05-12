@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verigen"
+version = "0.1.0"
+description = "DSPy-native framework for verifiable code generation through evolutionary optimization"
+requires-python = ">=3.9"
+dependencies = [
+    "dspy>=2.6",
+    "click>=8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+verigen = "verigen.cli.main:cli"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
