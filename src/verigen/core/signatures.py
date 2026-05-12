@@ -49,8 +49,5 @@ class ImproveBlockMutation(dspy.Signature):
         desc="Feedback from the last evaluation: pass/fail, score, errors, and suggestions for improvement"
     )
     generated_code = dspy.OutputField(
-        desc="The improved version of the program (the COMPLETE replacement)"
-    )
-    change_rationale = dspy.OutputField(
-        desc="Brief explanation of what was changed and why it should improve the result"
+        desc="The improved version of the program (the COMPLETE replacement). Keep code compact."
     )

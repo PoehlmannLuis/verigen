@@ -35,7 +35,8 @@ class TraceLogger:
     def save(self, path: Union[str, Path]) -> None:
         with open(path, "w") as f:
             f.write(self.to_jsonl())
-            f.write("\n")
+            if self.entries:
+                f.write("\n")
 
     @classmethod
     def from_jsonl(cls, path: Union[str, Path]) -> "TraceLogger":

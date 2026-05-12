@@ -8,7 +8,6 @@
 # Everything outside these markers is immutable context.
 # Everything inside is the editable block.
 
-import re
 from typing import Optional
 
 EVOLVE_BLOCK_START = "# EVOLVE-BLOCK-START"
@@ -44,9 +43,14 @@ def extract_block(code: str) -> Optional[str]:
 
 
 def replace_block(code: str, new_code: str) -> str:
-    """Replace the content with new generated code.
-
-    The LLM generates the full program (EVOLVE-BLOCK markers are
-    informational). Returns the new code as-is.
+    """DEPRECATED: LLM now generates the complete program. This function returns
+    new_code as-is. Kept for backwards compatibility with any external callers.
     """
+    import warnings
+    warnings.warn(
+        "replace_block is deprecated — LLM generates full programs. "
+        "This function returns new_code as-is and will be removed in v0.3.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return new_code

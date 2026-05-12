@@ -39,22 +39,22 @@ def run(
     TASK_DIR must contain initial.py (with EVOLVE-BLOCK markers) and evaluate.py.
     """
     # Configure DSPy LM
+    _default_lm_kwargs = dict(max_tokens=8192)
     if model:
-        lm_kwargs = {"model": model}
+        lm_kwargs = {"model": model, **_default_lm_kwargs}
         if api_base:
             lm_kwargs["api_base"] = api_base
         if "ollama" in model or "localhost" in (api_base or ""):
             lm_kwargs.setdefault("api_key", "not-needed")
         dspy.configure(lm=dspy.LM(**lm_kwargs))
     elif api_base:
-        # Model not specified but api_base is – infer from api_base
         dspy.configure(lm=dspy.LM(
             model="openai/qwen3.6",
             api_base=api_base,
             api_key="not-needed",
+            **_default_lm_kwargs,
         ))
     else:
-        # Try to connect to local llama-server as default
         import urllib.request
         try:
             urllib.request.urlopen("http://localhost:8080/v1/models", timeout=2)
@@ -62,6 +62,7 @@ def run(
                 model="openai/qwen3.6",
                 api_base="http://localhost:8080/v1",
                 api_key="not-needed",
+                **_default_lm_kwargs,
             ))
             click.echo("✓ Using local llama-server at http://localhost:8080/v1")
         except Exception:

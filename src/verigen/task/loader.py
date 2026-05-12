@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Callable, Optional, Union
 
 from verigen.core.evaluator import EvaluationResult, evaluate_in_sandbox
-from verigen.task.evolve_block import extract_block, replace_block
+from verigen.task.evolve_block import extract_block
 
 
 @dataclass
@@ -13,23 +13,17 @@ class TaskSpec:
     """A verifiable code generation task.
 
     Attributes:
-        description: Natural language description of what to build.
+        description: First heading from program.md.
+        program_context: Full content of program.md for rich task instructions.
         template: Content of initial.py with EVOLVE-BLOCK-START/END markers.
         eval_module_path: Absolute path to evaluate.py.
         evaluate_fn: Bound evaluator (calls evaluate_in_sandbox with this task's evaluate.py).
     """
     description: str
+    program_context: str
     template: str
     eval_module_path: str
     evaluate_fn: Callable[[str], EvaluationResult] = field(repr=False)
-
-    def extract_block(self) -> Optional[str]:
-        """Extract current code inside EVOLVE-BLOCK markers."""
-        return extract_block(self.template)
-
-    def replace_block(self, new_block: str) -> str:
-        """Create a full program by replacing EVOLVE-BLOCK content."""
-        return replace_block(self.template, new_block)
 
 
 def load_task(task_dir: Union[str, Path], timeout: int = 30) -> TaskSpec:
@@ -81,6 +75,7 @@ def load_task(task_dir: Union[str, Path], timeout: int = 30) -> TaskSpec:
 
     return TaskSpec(
         description=description,
+        program_context=program_context,
         template=template,
         eval_module_path=eval_path_str,
         evaluate_fn=evaluate_fn,
@@ -112,6 +107,7 @@ def make_task(
     template: str,
     eval_code: str,
     eval_module_path: Optional[Union[str, Path]] = None,
+    program_context: str = "",
     timeout: int = 30,
 ) -> TaskSpec:
     """Create a TaskSpec programmatically (e.g., from tests).
@@ -129,6 +125,7 @@ def make_task(
 
     return TaskSpec(
         description=description,
+        program_context=program_context,
         template=template,
         eval_module_path=str(eval_path),
         evaluate_fn=lambda code: evaluate_in_sandbox(str(eval_path), code, timeout=timeout),

@@ -1,5 +1,6 @@
 """Evaluation model and sandboxed execution for generated code."""
 
+import atexit
 import json
 import os
 import subprocess
@@ -9,6 +10,24 @@ import textwrap
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Optional, Union
+
+# Track temp code files for cleanup even if the process is killed mid-run.
+# Using a module-level list because atexit doesn't run on SIGKILL.
+_temp_files: list[str] = []
+
+
+def _cleanup_temp_files() -> None:
+    """Remove all tracked temp code files. Registered with atexit."""
+    for path in _temp_files[:]:
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+                _temp_files.remove(path)
+        except OSError:
+            pass
+
+
+atexit.register(_cleanup_temp_files)
 
 
 @dataclass
@@ -49,7 +68,6 @@ def evaluate_in_sandbox(
     """
     eval_path = Path(eval_module_path).resolve()
     eval_dir = eval_path.parent
-    eval_module_stem = eval_path.stem
 
     proc = None
     code_filename = None
@@ -63,6 +81,7 @@ def evaluate_in_sandbox(
         tmp.flush()
         code_filename = tmp.name
         tmp.close()
+        _temp_files.append(code_filename)
 
         runner = textwrap.dedent(f"""
         import sys, json, os
@@ -101,11 +120,12 @@ def evaluate_in_sandbox(
         stdout_str = proc.stdout or ""
         stderr_str = proc.stderr or ""
 
-        # Parse the JSON result following the marker
+        # Parse the JSON result following the marker.
+        # Do the split once — the old code called splitlines() inside the loop.
+        lines = stdout_str.splitlines()
         result_json = None
-        for i, line in enumerate(stdout_str.splitlines()):
+        for i, line in enumerate(lines):
             if line.strip() == "__VERIGEN_RESULT__":
-                lines = stdout_str.splitlines()
                 if i + 1 < len(lines):
                     result_json = lines[i + 1]
                 break
