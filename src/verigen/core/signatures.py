@@ -63,6 +63,9 @@ class ImproveBlockMutation(dspy.Signature):
     generated_code = dspy.OutputField(
         desc="The improved version of the program (the COMPLETE replacement). Keep code compact."
     )
+    change_rationale = dspy.OutputField(
+        desc="Brief explanation of what you changed and why. This will be shown to the next iteration as change_history."
+    )
 
 
 class FocusedBlockMutation(dspy.Signature):
@@ -102,4 +105,7 @@ class FocusedBlockMutation(dspy.Signature):
     )
     new_block = dspy.OutputField(
         desc="The improved implementation for the EVOLVE-BLOCK region only. Keep the same indentation. Do NOT include the # EVOLVE-BLOCK markers or the function/class wrapper."
+    )
+    change_rationale = dspy.OutputField(
+        desc="Brief explanation of what you changed and why. This will be shown to the next iteration as change_history."
     )

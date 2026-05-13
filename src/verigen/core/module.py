@@ -267,12 +267,8 @@ class VerifiableCodeGen(dspy.Module):
             )
             new_block = output.new_block.strip()
             candidate = replace_block_content(code, new_block)
-            rationale = getattr(output, 'change_rationale', None)
-            if rationale:
-                rationale = rationale.strip()
-            else:
-                rationale = ""
-            return candidate or code, rationale or ""
+            rationale = output.change_rationale.strip()
+            return candidate or code, rationale
         except AdapterParseError:
             return code, ""
 
