@@ -30,8 +30,12 @@ def evaluate(code_str: str) -> dict:
     ns = {}
     try:
         exec(compile(code_str, "<eval>", "exec"), ns)
-    except Exception as e:
+    except SyntaxError as e:
         return {"score": 0.0, "passed": False, "feedback": f"Syntax error: {e}", "metrics": {}, "artifacts": {}}
+    except AttributeError as e:
+        return {"score": 0.0, "passed": False, "feedback": f"Python version incompatibility: {e}", "metrics": {}, "artifacts": {}}
+    except Exception as e:
+        return {"score": 0.0, "passed": False, "feedback": f"Runtime error: {e}", "metrics": {}, "artifacts": {}}
 
     fn = ns.get("find_defined_names")
     if fn is None:

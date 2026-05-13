@@ -20,6 +20,7 @@ nodes.
 - Handle empty code (return empty set)
 - Handle code with only expressions (no definitions)
 - Must match the reference implementation's output exactly
+- **Target Python 3.9 runtime** — do NOT use `ast.TryStar` (3.11+), `ast.Match` (3.10+), or any attribute that doesn't exist in Python 3.9's `ast` module. Stick to `ast.FunctionDef`, `ast.AsyncFunctionDef`, `ast.ClassDef`, and `ast.Module` which are available on all versions.
 
 ## Optimization ladder (approximate scores)
 - ast.walk (visits all nodes): ~0.5 (equal to reference)
