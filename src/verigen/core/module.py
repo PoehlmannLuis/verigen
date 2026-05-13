@@ -134,8 +134,11 @@ class VerifiableCodeGen(dspy.Module):
 
             change_history.record(candidate_rationale, candidate_result.score, candidate_result.passed)
 
-            self._record_trace(i + 1, candidate_code, candidate_result,
-                               candidate_rationale, elapsed, is_best=False)
+            self._record_trace(
+                i + 1, phase="mutate", code=candidate_code,
+                result=candidate_result, rationale=candidate_rationale,
+                elapsed=elapsed, is_best=False,
+            )
 
             improved = False
             if candidate_result.passed and candidate_result.score > best_result.score:
@@ -181,8 +184,11 @@ class VerifiableCodeGen(dspy.Module):
             candidate_result = task.evaluate_fn(candidate_code)
             elapsed = (time.perf_counter() - t0) * 1000
 
-            self._record_trace(i + 1, candidate_code, candidate_result,
-                               candidate_rationale, elapsed, is_best=False)
+            self._record_trace(
+                i + 1, phase="mutate", code=candidate_code,
+                result=candidate_result, rationale=candidate_rationale,
+                elapsed=elapsed, is_best=False,
+            )
 
             improved = False
             if candidate_result.passed:
