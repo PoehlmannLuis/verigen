@@ -26,7 +26,7 @@ Output:
 examples/palindrome/output/
 ├── best_program.py      # Best code found
 ├── summary.json         # Score, metrics, paths
-└── trace.jsonl          # Full evolution history
+└── trace.jsonl          # Full evolution history (one JSON line per iteration)
 ```
 
 ---
@@ -35,27 +35,27 @@ examples/palindrome/output/
 
 If you're using [pi](https://pi.dev), the `verigen` Skill is auto-discovered in this repo. The agent can:
 
-1. **Ask the agent** to create a task from your description
+1. **Create a task** from your description (writes `initial.py`, `evaluate.py`, `program.md`)
 2. **Run evolution** with `verigen run <task-dir/>`
-3. **Get optimized code** with score and iteration history
+3. **Return optimized code** with score and iteration history
 
-Example:
+Example interaction:
 ```
 > Generate a fast palindrome checker and optimize it
 ```
-The agent creates a task, runs evolution, and returns the optimized code.
+The agent scaffolds the task, runs evolution, and returns the best code found.
 
 ---
 
 ## How It Works
 
-You provide two files per task:
+You provide three files per task:
 
 | File | Purpose |
 |---|---|
-| `initial.py` | Seed code with `# EVOLVE-BLOCK` markers around the editable region |
+| `initial.py` | Seed code with `# EVOLVE-BLOCK-START` / `# EVOLVE-BLOCK-END` markers around the editable region |
 | `evaluate.py` | Exports `evaluate(code_str) -> dict` with keys: `score`, `passed`, `feedback`, `metrics`, `artifacts` |
-| `program.md` | Markdown instructions for the LLM. First heading = task description. |
+| `program.md` | Task description + rich instructions. First `# Heading` = short description; full content = context for the LLM. |
 
 **The loop:**
 
@@ -63,36 +63,41 @@ You provide two files per task:
         ┌──────────────────────────────────────────────────┐
         │  DSPy Module: VerifiableCodeGen                  │
         │                                                  │
-initial  │  1. Generate initial code (fills EVOLVE-BLOCK)   │
+initial  │  1. Generate initial code (full program)         │
    │     │  2. Evaluate in subprocess                       │
-   ▼     │  3. If initial fails → stop                      │
+   ▼     │  3. If initial fails hard constraints → stop     │
  mutate  │  4. LM suggests improvement (guided by feedback)  │
-   │     │  5. Evaluate → keep if score improves             │
+   │     │  5. Evaluate → keep if passed AND score improves  │
    ▼     │  6. Repeat up to --max-iterations                 │
  result  │  7. Return best code + trace                      │
         └──────────────────────────────────────────────────┘
 ```
 
-- **Hard constraints**: If `passed=False`, candidate is rejected.
+- **Hard constraints**: If `passed=False`, candidate is rejected. If the initial generation fails hard constraints, the loop stops immediately — no point mutating fundamentally broken code.
 - **Continuous metrics**: Higher `score` wins. Latency, accuracy, throughput — your `evaluate()` decides.
-- **Sandbox**: Generated code runs in a subprocess with timeout.
+- **Sandbox**: Generated code runs in a subprocess with timeout. Process-level isolation (not a security container — see [Caveats](#caveats)).
 
 ---
 
 ## Creating a Task
 
-```bash
-mkdir -p my-task && cd my-task
+### Step 1 — `initial.py`
 
-cat > initial.py << 'EOF'
+The seed code. The LLM generates the **complete program**; EVOLVE-BLOCK markers are guidance, not splicing points.
+
+```python
 def solve(n: int) -> int:
     """Return n * 2."""
     # EVOLVE-BLOCK-START
     raise NotImplementedError("Replace this!")
     # EVOLVE-BLOCK-END
-EOF
+```
 
-cat > evaluate.py << 'EVALEOF'
+### Step 2 — `evaluate.py`
+
+Must export `evaluate(code_str: str) -> dict`:
+
+```python
 import time
 
 def evaluate(code: str) -> dict:
@@ -100,22 +105,49 @@ def evaluate(code: str) -> dict:
     exec(code, ns)
     fn = ns["solve"]
 
-    # Correctness
-    assert fn(5) == 10
-    assert fn(0) == 0
+    # Correctness tests
+    assert fn(5) == 10, "basic case"
+    assert fn(0) == 0, "zero"
+    assert fn(-3) == -6, "negative"
 
-    # Performance
+    # Performance benchmark
     t0 = time.perf_counter()
-    for _ in range(1000): fn(100)
+    for _ in range(1000):
+        fn(100)
     avg_us = (time.perf_counter() - t0) / 1000 * 1e6
+
+    # Score: 1.0 at 0µs, 0.0 at ≥100µs — tune to your target
     score = max(0.0, 1.0 - avg_us / 100.0)
 
-    return {"score": score, "passed": True,
-            "feedback": f"avg {avg_us:.1f}us", "metrics": {"us": avg_us}, "artifacts": {}}
-EVALEOF
+    return {
+        "score": score,
+        "passed": True,
+        "feedback": f"All tests passed. Avg {avg_us:.1f}µs/call",
+        "metrics": {"avg_us": avg_us},
+        "artifacts": {},
+    }
+```
 
-echo "# Double it: return n * 2" > program.md
+### Step 3 — `program.md`
 
+```markdown
+# Double it: return n * 2
+
+Return the input integer multiplied by 2. Include a handle for zero and negatives.
+```
+
+Then run:
+
+```bash
+verigen run ./
+```
+
+Or scaffold automatically:
+
+```bash
+./skill/scripts/new-task.sh my-task
+cd my-task
+# Edit program.md and evaluate.py, then:
 verigen run ./
 ```
 
@@ -130,39 +162,44 @@ verigen run <task-dir> [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--max-iterations, -n` | 30 | Maximum evolution iterations |
-| `--score-threshold, -t` | — | Early stop when score >= threshold (e.g. 0.95) |
-| `--model` | auto-detect | DSPy LM model string: `openai/gpt-4o`, `ollama_chat/qwen3.6`, etc. |
-| `--api-base` | — | Custom API base URL for the model |
+| `--score-threshold, -t` | — | Early stop when score ≥ threshold (e.g. 0.95) |
+| `--model` | auto-detect | DSPy LM: `openai/gpt-4o`, `ollama_chat/qwen3.6`, `google/gemini-3-pro`, etc. |
+| `--api-base` | — | API base URL (e.g., `http://localhost:8080/v1`) |
 | `--output, -o` | `<task-dir>/output/` | Output directory |
 | `--timeout` | 30 | Evaluation subprocess timeout (seconds) |
 
-### Output
+### Output artifacts
 
 ```
 <output-dir>/
 ├── best_program.py      # Final generated code
-├── summary.json         # Score, iteration count, feedback, metrics
-└── trace.jsonl          # One JSON line per iteration
+├── summary.json          # score, n_iterations, feedback, metrics
+└── trace.jsonl          # One JSON object per iteration
 ```
 
-### Configuration
+### LLM Configuration
 
-- **LLM**: DSPy handles it. `dspy.configure(lm=...)` or CLI flags.
-  Works with OpenAI, Anthropic, Google, Ollama, vLLM, llama.cpp.
-- **Local default**: Auto-detects `http://localhost:8080/v1` for llama-server.
+DSPy handles all providers. The CLI auto-detects a local `llama-server` at `http://localhost:8080/v1`. Override with `--model` and `--api-base`:
+
+```bash
+verigen run . --model openai/gpt-4o
+verigen run . --model openai/qwen3.6 --api-base http://localhost:8080/v1
+```
+
+Works with OpenAI, Anthropic, Google, Ollama, llama.cpp, vLLM.
 
 ---
 
 ## Example Tasks
 
-| Task | Pattern | Difficulty |
-|------|---------|-----------|
-| `examples/palindrome/` | String processing | Easy |
-| `tasks/game_of_life/` | Matrix computation | Medium |
-| `tasks/levenshtein/` | DP algorithm | Medium |
-| `tasks/lru_cache/` | Data structure | Medium |
-| `tasks/regex_match/` | Recursive → DP | Hard |
-| `tasks/topological_sort/` | Graph algorithm | Medium |
+| Task | Pattern | Difficulty | Notes |
+|------|---------|-----------|-------|
+| `examples/palindrome/` | String processing | Easy | Simple correctness + speed |
+| `tasks/game_of_life/` | Matrix computation | Medium | Padding vs vectorized |
+| `tasks/levenshtein/` | DP algorithm | Medium | 2D → 1D row optimization |
+| `tasks/lru_cache/` | Data structure | Medium | OrderedDict → doubly-linked list |
+| `tasks/regex_match/` | Recursive → DP | Hard | Backtracking traps, DP table |
+| `tasks/topological_sort/` | Graph algorithm | Medium | Kahn's vs DFS optimization |
 
 ---
 
@@ -171,41 +208,52 @@ verigen run <task-dir> [options]
 ```python
 from verigen import VerifiableCodeGen, load_task
 
-# Load and run
+# Load a task
 task = load_task("tasks/palindrome/")
+
+# Run evolution
 gen = VerifiableCodeGen(max_iterations=50, score_threshold=0.95)
 result = gen(task)
 
-# Use the best code
-exec(compile(result.best_code, "<gen>", "exec"))
-print(is_palindrome("racecar"))  # True
+# Best code + score
+print(f"Score: {result.best_score:.4f}")
+print(result.best_code)
 
-# Inspect trace
+# Full iteration history
 for entry in result.trace.entries:
-    print(f"[{entry.iteration:3d}] {entry.phase:7s} score={entry.score:.4f}  {entry.feedback[:60]}")
+    badge = "✓" if entry.passed else "✗"
+    print(f"  [{entry.iteration:3d}] {entry.phase:7s} {badge} score={entry.score:.4f}")
 ```
 
 ---
 
 ## Skill for pi
 
-This repo ships as a [pi Skill](https://pi.dev). The agent reads `SKILL.md` to understand the tool and orchestrate the CLI.
+The repo ships as a [pi Skill](https://pi.dev). pi auto-discovers `SKILL.md` at the project root.
 
-### Discovery
+### Discovery locations
 
-- **Project-local**: pi discovers `SKILL.md` at the repo root when you're in the project directory
-- **Global install**: symlink to `~/.pi/agent/skills/verigen/SKILL.md` (coming soon)
-- **Manual load**: `/skill:./SKILL.md` from within the repo
+| Location | How |
+|----------|-----|
+| Project root | `SKILL.md` at repo root |
+| Global | `~/.pi/agent/skills/verigen/SKILL.md` (symlink or copy) |
+| Manual | `/skill:./SKILL.md` from within the repo |
 
-### Agent Workflow
+### Agent workflow
 
-When you ask the pi agent to generate optimized code:
+1. Read `SKILL.md` → understand the tool
+2. Analyze requirements (signature, constraints, performance target)
+3. Scaffold task: `initial.py` + `evaluate.py` + `program.md`
+4. Run `verigen run <task-dir/>`
+5. Return code, score, and iteration history
 
-1. Agent reads `SKILL.md` and understands the tool
-2. Analyzes your requirements (function signature, constraints, performance needs)
-3. Creates a task directory with `initial.py`, `evaluate.py`, `program.md`
-4. Runs `verigen run <task-dir/>` with appropriate options
-5. Presents results: code, score, iteration history, improvement trajectory
+---
+
+## Caveats
+
+**Sandbox is process-level, not a security container.** The subprocess runs in the same environment with full access to the filesystem and environment variables. A malicious `evaluate.py` can call `os.system()`. This is fine for trusted local tasks; it is **not** suitable for untrusted third-party tasks. Docker sandboxing is planned for v0.2.
+
+**Evolution is single-threaded.** The loop maintains one candidate at a time (greedy hill-climbing). Population-based evolution with archive and diversity scoring is planned for v0.2.
 
 ---
 
@@ -215,7 +263,7 @@ When you ask the pi agent to generate optimized code:
 # Unit tests (no LLM needed)
 python -m pytest tests/ -v
 
-# Integration tests (needs LLM)
+# Integration tests (needs an LLM)
 VERIGEN_TEST_LLM=1 python -m pytest tests/test_integration.py -v
 ```
 
@@ -223,6 +271,18 @@ VERIGEN_TEST_LLM=1 python -m pytest tests/test_integration.py -v
 
 ## Project Status
 
-v0.1 — MVP. Single-thread evolution, Python + subprocess sandbox, DSPy deep integration.
+**v0.1.1** — patch with bug fixes.
 
-**Planned**: Population-based evolution, Docker sandboxing, DSPy prompt-space meta-optimization (MIPROv2), parallel evaluation.
+| Area | Status |
+|------|--------|
+| Single-thread evolution | ✅ |
+| Python subprocess sandbox | ✅ (process isolation, not container) |
+| DSPy integration | ✅ |
+| CLI | ✅ |
+| pi Skill | ✅ |
+| Early exit on failed init | ✅ (new) |
+| Full-code trace (not block-only) | ✅ (new) |
+| Temp file cleanup | ✅ (new) |
+| Population/parallel evaluation | 🔜 v0.2 |
+| Docker sandboxing | 🔜 v0.2 |
+| DSPy MIPROv2 meta-optimization | 🔜 v0.2 |

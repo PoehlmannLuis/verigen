@@ -71,7 +71,20 @@ def solve(data: list[int]) -> int:
     # EVOLVE-BLOCK-END
 ```
 
-The mutator can change anything in the file, but the markers guide it to focus on the critical section.
+## How the LLM Generates Code
+
+The LLM generates the **complete program** — it sees the full `initial.py` as context and writes the complete replacement. The EVOLVE-BLOCK markers in the template are guidance signals, not splicing anchors (the old block-splicing approach is deprecated).
+
+**What gets passed to the LLM per phase:**
+
+| Phase | Input fields | Notes |
+|-------|-------------|-------|
+| Initial | `task_description`, `program_template` | Writes complete program |
+| Mutate | `task_description`, `program_context`, `current_code`, `evaluation_feedback` | Writes complete replacement |
+
+`program_context` is the full content of `program.md` (rich task instructions, optimization ladders, etc.).
+
+If the initial generation fails hard constraints (`passed=False`), the loop stops immediately — mutating from broken code rarely succeeds.
 
 ### `program.md` — Task Description
 
@@ -167,11 +180,11 @@ output/
 
 When a user asks for code that needs to be correct AND performant:
 
-1. **Understand the task** — what's the function signature? what's the I/O? what are the performance requirements?
-2. **Create the task directory** — write `initial.py`, `evaluate.py`, and `program.md` based on user requirements
+1. **Understand the task** — function signature, I/O, constraints, performance target
+2. **Create the task directory** — write `initial.py`, `evaluate.py`, and `program.md`
 3. **Run evolution** — `verigen run <task-dir/> --max-iterations 30`
-4. **Present results** — show the generated code, score, and iteration history
-5. **Iterate** — if results aren't satisfactory, tweak the evaluator (harder tests, different scoring) or increase iterations
+4. **Present results** — code, score, and iteration history
+5. **Iterate** — if unsatisfactory, tighten the evaluator or increase iterations
 
 ### Task Types by Difficulty
 
@@ -184,10 +197,11 @@ When a user asks for code that needs to be correct AND performant:
 
 ### Evaluator Design Tips
 
-- **Start strict but not too strict**: A single failing test that should be easy should not fail the entire evaluation. Use `passed=False` only for hard blockers.
-- **Benchmark realistically**: Use enough iterations to get stable latency measurements (1000+ calls).
-- **Feedback is key**: The LLM mutator reads `feedback` to decide what to change. Be descriptive about what went wrong.
-- **Optimization ladders**: Include approximate expected scores in `program.md` for different approaches (helps the agent set expectations).
+- **Start strict but not too strict**: Use `passed=False` only for hard blockers (test failures, crashes). Use `score` to discriminate between passing implementations.
+- **Benchmark realistically**: Use enough iterations to get stable latency measurements (1000+ calls per measurement).
+- **Feedback is the primary signal**: The LLM mutator reads `feedback` to decide what to change. Be descriptive about errors; up to 1000 chars is passed through.
+- **Optimization ladders**: Include approximate expected scores in `program.md` for different approaches — this helps set expectations and guides the mutator.
+- **Score normalization**: Cap the score at 1.0 (`min(speedup, 1.0)`). A score > 1.0 means you're faster than the reference, but the loop can't improve further.
 
 ---
 
@@ -235,11 +249,19 @@ print(f"passed={eval_result.passed} score={eval_result.score}")
 
 ## Common Pitfalls
 
-1. **No EVOLVE-BLOCK markers**: The task won't load. Every `initial.py` must have `# EVOLVE-BLOCK-START` and `# EVOLVE-BLOCK-END`.
-2. **Evaluator crashes**: If `evaluate()` raises an unhandled exception, the sandbox catches it and returns `passed=False`. Check stderr.
-3. **Slow first iteration**: The initial generation + evaluation can take 10-60s depending on LLM speed.
-4. **Overly strict evaluator**: If `passed=False` is too easy to trigger, the mutator can never find improvements. Make it pass for any reasonable implementation, then use `score` to discriminate.
-5. **Timeout**: Default eval timeout is 30s. Increase with `--timeout` for heavy benchmarks.
+1. **Missing EVOLVE-BLOCK markers**: `load_task()` validates their presence. Every `initial.py` must have `# EVOLVE-BLOCK-START` and `# EVOLVE-BLOCK-END`.
+2. **Evaluator crashes**: Unhandled exceptions in `evaluate()` return `passed=False`. The full error appears in `feedback`. Check the trace.
+3. **Slow first iteration**: Initial generation + evaluation takes 10–60s depending on LLM speed.
+4. **Overly strict evaluator**: If `passed=False` fires on reasonable code, the mutator can never improve it. Reserve `passed=False` for hard failures only.
+5. **Timeout too short**: Default is 30s. Increase with `--timeout` for heavy benchmarks.
+6. **Score saturates at 1.0**: If `score` is capped, the loop thinks it's done even if the reference is slow. Consider a relative score (vs a reference implementation).
+
+## What Changed in v0.1.1
+
+- **Full-program generation**: The LLM writes complete programs, not just block snippets. No more indentation stitching.
+- **Early exit**: If the initial generation fails hard constraints, the loop stops immediately.
+- **Trace stores full code**: `TraceEntry.block_code` is the complete candidate, not just the extracted block.
+- **Feedback signal**: Up to 1000 chars of evaluator feedback is passed to the LLM per iteration.
 
 ---
 
