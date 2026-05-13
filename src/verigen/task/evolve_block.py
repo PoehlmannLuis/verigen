@@ -95,17 +95,16 @@ def replace_block_content(full_code: str, new_block: str) -> str:
             break
 
     # Normalize indentation:
-    # 1. Dedent the raw block (find minimum indent across all lines, remove it)
+    # 1. Dedent the raw block using textwrap.dedent (removes common leading
+    #    whitespace while preserving relative indentation)
     # 2. Strip leading/trailing blank lines
     # 3. Apply the template's block indentation
     clean_block = new_block
     if clean_block.strip():
-        raw_lines = clean_block.splitlines()
-        indents = [len(l) - len(l.lstrip()) for l in raw_lines if l.strip()]
-        if indents and min(indents) > 0:
-            n = min(indents)
-            clean_block = "\n".join(l[n:] if len(l) >= n else l for l in raw_lines)
-        clean_block = clean_block.strip()
+        try:
+            clean_block = textwrap.dedent(clean_block).strip()
+        except Exception:
+            clean_block = clean_block.strip()
         indented = textwrap.indent(clean_block, indent)
         new_lines = lines[:start_idx + 1] + [indented] + lines[end_idx:]
     else:

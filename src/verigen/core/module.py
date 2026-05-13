@@ -284,6 +284,13 @@ class VerifiableCodeGen(dspy.Module):
             )
             new_block = _clean_dspy_output(output.new_block)
             candidate = replace_block_content(code, new_block)
+            # Validate: if the focused mutation produces broken syntax,
+            # fall back to the original code
+            if candidate != code:
+                try:
+                    compile(candidate, "<focused>", "exec")
+                except SyntaxError:
+                    return code, ""
             rationale = output.change_rationale.strip()
             return candidate or code, rationale
         except AdapterParseError:

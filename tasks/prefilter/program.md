@@ -2,28 +2,47 @@
 
 Implement `find_defined_names(code: str) -> Set[str]` that returns the set
 of all function, class, and async function names defined in the given Python
-source code. Must find definitions at any nesting level (top-level functions,
-methods inside classes, nested functions, etc.).
+source code. Must find definitions at any nesting level.
 
-This is used by verigen's own static analysis pre-filter to verify that
-LLM-generated code defines the expected symbol. It's called on every
-candidate during evolution, so speed matters.
+Used by verigen's static analysis pre-filter on every candidate during
+evolution. Called thousands of times per run. Must be CORRECT before fast.
 
-The reference implementation uses `ast.walk(tree)` which visits EVERY node
-in the AST (thousands for large generated programs). A faster approach
-avoids visiting the entire tree since we only need function/class definition
-nodes.
+## Correctness rules (hard constraints)
+1. Must handle empty/blank code → return `set()`
+2. Must handle code with only expressions → return `set()`
+3. Must handle syntax errors → try/except `SyntaxError`, return `set()`
+4. Must return the SAME set as the reference (`ast.walk` + isinstance filter)
+5. Must find definitions at ANY nesting depth (function inside class inside function...)
+6. Return type must be `Set[str]`
 
-## Requirements
-- Return a `Set[str]` of all defined names
-- Include: functions, classes, async functions, methods, nested functions
-- Handle empty code (return empty set)
-- Handle code with only expressions (no definitions)
-- Must match the reference implementation's output exactly
-- **Target Python 3.9 runtime** — do NOT use `ast.TryStar` (3.11+), `ast.Match` (3.10+), or any attribute that doesn't exist in Python 3.9's `ast` module. Stick to `ast.FunctionDef`, `ast.AsyncFunctionDef`, `ast.ClassDef`, and `ast.Module` which are available on all versions.
+## The ONLY correct recursive pattern
+Use `ast.iter_child_nodes(node)` to get ALL children of any AST node.
+This automatically handles `.body`, `.orelse`, `.handlers`, `.finalbody`,
+`.cases`, etc. — everything. Do NOT enumerate AST statement types.
 
-## Optimization ladder (approximate scores)
-- ast.walk (visits all nodes): ~0.5 (equal to reference)
-- ast.iter_child_nodes (top-level only, misses nested): ~0.3 (WRONG — incorrect)
-- ast.iter_child_nodes + manual recursion into classes: ~0.7–0.9
-- Manual recursion that skips function bodies: ~0.8–1.0
+## What NOT to do
+- DO NOT enumerate AST node types (no `isinstance(node, ast.If)` chains)
+- DO NOT use `ast.TryStar`, `ast.TryExcept`, `ast.Match`, or any
+  version-specific attribute by name
+- DO NOT use `hasattr(node, 'body')` — misses orelse/handlers/finalbody
+- DO NOT write 100+ line functions — the correct solution is <30 lines
+
+## Performance optimization (in order of impact)
+1. **Use `ast.iter_child_nodes`** — already avoids visiting terminal nodes
+2. **Localize** `isinstance`, `defined_names.add` to avoid attribute lookups
+3. **`while` stack instead of recursion** — avoid Python call overhead
+4. **Short-circuit** — skip bodies of functions/classes after extracting name?
+   (correct only if no nested definitions, but there ARE nested defs)
+
+## Benchmark context
+- Reference uses `ast.walk()` on a Module tree — visits ALL AST nodes
+  (expressions, literals, identifiers — everything)
+- `ast.walk()` is implemented in C — to beat it, avoid visiting nodes
+  that can't contain definitions by using controlled `iter_child_nodes`
+- Score ~0.65 (1.8×) achievable with a simple recursive approach
+- Score ~0.80+ requires reducing Python overhead (iterative, localized)
+
+Expected function signature:
+```python
+def find_defined_names(code: str) -> Set[str]:
+```
