@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-from verigen.core.evaluator import EvaluationResult, evaluate_in_sandbox
-from verigen.task.evolve_block import extract_block
+from verigen.core.evaluator import EvaluationResult, EvalWorkerPool, evaluate_in_sandbox
+from verigen.task.evolve_block import extract_block, extract_expected_name
 
 
 @dataclass
@@ -17,13 +17,17 @@ class TaskSpec:
         program_context: Full content of program.md for rich task instructions.
         template: Content of initial.py with EVOLVE-BLOCK-START/END markers.
         eval_module_path: Absolute path to evaluate.py.
-        evaluate_fn: Bound evaluator (calls evaluate_in_sandbox with this task's evaluate.py).
+        evaluate_fn: Bound evaluator (uses EvalWorkerPool for speed, cached, pre-filtered).
+        expected_name: The function or class name expected in generated code (for static pre-filter).
+        _pool: Internal evaluation worker pool.
     """
     description: str
     program_context: str
     template: str
     eval_module_path: str
     evaluate_fn: Callable[[str], EvaluationResult] = field(repr=False)
+    expected_name: Optional[str] = None
+    _pool: Optional[EvalWorkerPool] = field(default=None, repr=False)
 
 
 def load_task(task_dir: Union[str, Path], timeout: int = 30) -> TaskSpec:
@@ -63,22 +67,28 @@ def load_task(task_dir: Union[str, Path], timeout: int = 30) -> TaskSpec:
             f"{initial_path} must contain EVOLVE-BLOCK-START and EVOLVE-BLOCK-END markers"
         )
 
+    # Extract expected function/class name for static pre-filter
+    expected_name = extract_expected_name(template)
+
     # Read description and full context from program.md
     description = _read_description(program_path)
     program_context = program_path.read_text()
 
-    # Create the bound evaluator
+    # Create evaluation pool (persistent worker, caching, pre-filter)
     eval_path_str = str(eval_path)
+    pool = EvalWorkerPool(str(eval_path.parent))
 
     def evaluate_fn(code_str: str) -> EvaluationResult:
-        return evaluate_in_sandbox(eval_path_str, code_str, timeout=timeout)
+        return pool.evaluate(code_str, timeout=timeout, expected_name=expected_name)
 
     return TaskSpec(
         description=description,
         program_context=program_context,
         template=template,
+        expected_name=expected_name,
         eval_module_path=eval_path_str,
         evaluate_fn=evaluate_fn,
+        _pool=pool,
     )
 
 
@@ -123,10 +133,12 @@ def make_task(
         eval_path = tmp_dir / "evaluate.py"
         eval_path.write_text(eval_code)
 
+    expected_name = extract_expected_name(template)
     return TaskSpec(
         description=description,
         program_context=program_context,
         template=template,
+        expected_name=expected_name,
         eval_module_path=str(eval_path),
         evaluate_fn=lambda code: evaluate_in_sandbox(str(eval_path), code, timeout=timeout),
     )

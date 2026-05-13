@@ -58,8 +58,48 @@ class ImproveBlockMutation(dspy.Signature):
         desc="Feedback from the last evaluation: pass/fail, score, errors, and suggestions for improvement"
     )
     change_history = dspy.InputField(
-        desc="What was changed in the previous iteration and whether it helped. Learn from past mistakes."
+        desc="What was changed previously and whether it helped. Learn from past mistakes."
     )
     generated_code = dspy.OutputField(
         desc="The improved version of the program (the COMPLETE replacement). Keep code compact."
+    )
+
+
+class FocusedBlockMutation(dspy.Signature):
+    """Improve just the implementation inside the EVOLVE-BLOCK-START/END markers.
+
+    You DON'T need to write the full program — only the inner implementation
+    that goes BETWEEN the markers. The surrounding code (class, function
+    signature, imports, helper methods) is preserved automatically.
+
+    You have access to:
+    1. The task description (what the code should do)
+    2. The full surrounding code context (everything outside the EVOLVE-BLOCK)
+    3. The current implementation inside the EVOLVE-BLOCK
+    4. Evaluation feedback and change history
+
+    Make targeted improvements to the inner implementation. Keep the same
+    indentation level as the original block content.
+    """
+
+    task_description = dspy.InputField(
+        desc="What the program should accomplish"
+    )
+    task_context = dspy.InputField(
+        desc="Rich task instructions, optimization hints, and performance targets"
+    )
+    surrounding_context = dspy.InputField(
+        desc="The full program code. Your new implementation replaces only the region between EVOLVE-BLOCK-START and EVOLVE-BLOCK-END"
+    )
+    current_block = dspy.InputField(
+        desc="The current code inside the EVOLVE-BLOCK region that needs improvement"
+    )
+    evaluation_feedback = dspy.InputField(
+        desc="Feedback from the last evaluation: pass/fail, score, errors, and suggestions"
+    )
+    change_history = dspy.InputField(
+        desc="What was changed in the previous iteration and whether it helped"
+    )
+    new_block = dspy.OutputField(
+        desc="The improved implementation for the EVOLVE-BLOCK region only. Keep the same indentation. Do NOT include the # EVOLVE-BLOCK markers or the function/class wrapper."
     )
