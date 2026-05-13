@@ -18,6 +18,23 @@ from verigen.task.evolve_block import extract_block, replace_block_content
 from verigen.task.loader import TaskSpec
 
 
+_DSPY_LEAK_PATTERNS = [
+    "Respond with the corresponding output fields",
+    "[[ ## reasoning ## ]]",
+    "[[ ## generated_code ## ]]",
+    "[[ ## completed ## ]]",
+]
+
+
+def _clean_dspy_output(code: str) -> str:
+    """Strip DSPy chain-of-thought format markers that sometimes leak into code."""
+    for marker in _DSPY_LEAK_PATTERNS:
+        idx = code.find(marker)
+        if idx != -1:
+            code = code[:idx]
+    return code.strip()
+
+
 class VerifiableCodeGen(dspy.Module):
     """A DSPy module that generates and evolutionarily improves code to satisfy
     hard constraints (tests pass) and optimize continuous metrics (latency, score, etc.).
@@ -81,7 +98,7 @@ class VerifiableCodeGen(dspy.Module):
                 task_context=task.program_context,
                 program_template=template,
             )
-            best_code = output.generated_code.strip()
+            best_code = _clean_dspy_output(output.generated_code)
         except AdapterParseError:
             best_code = template
         elapsed = (time.perf_counter() - t0) * 1000
@@ -242,7 +259,7 @@ class VerifiableCodeGen(dspy.Module):
                 evaluation_feedback=feedback,
                 change_history=change_history,
             )
-            candidate = mutation.generated_code.strip()
+            candidate = _clean_dspy_output(mutation.generated_code)
             rationale = mutation.change_rationale.strip()
             return candidate or code, rationale
         except AdapterParseError:
@@ -265,7 +282,7 @@ class VerifiableCodeGen(dspy.Module):
                 evaluation_feedback=feedback,
                 change_history=change_history,
             )
-            new_block = output.new_block.strip()
+            new_block = _clean_dspy_output(output.new_block)
             candidate = replace_block_content(code, new_block)
             rationale = output.change_rationale.strip()
             return candidate or code, rationale
