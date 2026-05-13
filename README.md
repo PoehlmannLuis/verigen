@@ -220,6 +220,7 @@ Works with OpenAI, Anthropic, Google, Ollama, llama.cpp, vLLM.
 | `tasks/levenshtein/` | DP algorithm | Medium | 2D → 1D row optimization |
 | `tasks/lru_cache/` | Data structure | Medium | OrderedDict → doubly-linked list |
 | `tasks/topological_sort/` | Graph algorithm | Medium | Kahn's vs DFS optimization |
+| `tasks/prefilter/` | AST walking (dogfooding 🐶) | Medium | ast.walk C-optimized vs Python recursion |
 
 ---
 

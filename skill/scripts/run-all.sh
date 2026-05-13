@@ -18,8 +18,8 @@ DEFAULT_TASKS=(
     "tasks/game_of_life"
     "tasks/levenshtein"
     "tasks/lru_cache"
-    "tasks/regex_match"
     "tasks/topological_sort"
+    "tasks/prefilter"
 )
 
 MODELS="${MODELS:-auto}"

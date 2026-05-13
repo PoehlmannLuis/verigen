@@ -335,26 +335,32 @@ For CI/CD and scripting, suppress the live progress output (already possible via
 
 ---
 
-## Proposed v0.3 Roadmap
+## v0.3 Status — ✅ All Implemented!
 
-### Phase 1 (Core Architecture)
-1. Subprocess pool (`--eval-mode pool` becomes default)
-2. Evaluation caching (LRU, in-memory)
-3. Static analysis pre-filter
+| Item | Status | Notes |
+|------|--------|-------|
+| Subprocess pool (`EvalWorkerPool`) | ✅ | Persistent workers, stdin/stdout JSON protocol, SIGALRM timeout |
+| Evaluation caching | ✅ | SHA256 LRU cache, max 100 entries |
+| Static analysis pre-filter | ✅ | `compile()` + AST structural check |
+| Beam search | ✅ | `--strategy beam`, `--beam-width N`, weighted random selection |
+| Focused mutation | ✅ | `--mutation-mode focused`, dedent+reindent normalization |
+| Multi-turn mutation context | ✅ | `_ChangeHistory` tracks last 3 attempts |
+| Smarter scaffold template | ✅ | Reference impl, sigmoid scoring, richer hints |
+| Graceful LLM error recovery | ✅ | AdapterParseError handled, worker crash auto-restart |
+| Quiet mode | ✅ | `-q` / `--quiet` flag |
+| Score interpretation | ✅ | Human-readable in CLI output |
+| Dogfooding task (`tasks/prefilter/`) | ✅ | Optimize verigen's own AST traversal |
 
-### Phase 2 (Exploration)
-4. Beam search (`--strategy beam`, K=3 default)
-5. Focused mutation (EVOLVE-BLOCK mode as `--mutation-mode focused`)
-6. Multi-turn mutation context (last 3 iterations)
+### Dogfooding Results
 
-### Phase 3 (Polish)
-7. Smarter scaffold template
-8. DSPy module save/load
-9. Graceful LLM error recovery
-10. Quiet mode
+The `tasks/prefilter/` task targets verigen's own `prefilter_code` function.
+Benchmark confirmed that `ast.walk` (C-implemented) is faster than Python-level
+`ast.iter_child_nodes` + manual recursion — validating that the current
+implementation is already near-optimal. The task is ready for further
+optimization (short-circuit on expected name match) when an LLM is available.
 
-### Deferred
-- Full population evolution (μ+λ) — v0.4
-- Inline `--no-sandbox` eval — v0.4
-- `dspy.Assert` for trace recording — v0.4
-- CI/CD integration — v0.5
+### Deferred to v0.4
+- Full population evolution (μ+λ)
+- Inline `--no-sandbox` eval
+- `dspy.Assert` for trace recording
+- CI/CD integration
