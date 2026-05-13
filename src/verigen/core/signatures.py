@@ -29,6 +29,10 @@ class GenerateInitialBlock(dspy.Signature):
 class ImproveBlockMutation(dspy.Signature):
     """Improve the Python program based on evaluation feedback and change history.
 
+    Your goal is to MAXIMIZE the score. Even if the code passes all tests,
+    there is ALWAYS room for improvement — aim for score > 0.90.
+    Try different algorithms, data structures, and micro-optimizations.
+
     You have access to:
     1. The task description (what the code should do)
     2. The task context (rich instructions, optimization targets, algorithm hints)
@@ -37,9 +41,12 @@ class ImproveBlockMutation(dspy.Signature):
     5. Evaluation feedback from the last run (score, errors, suggestions)
     6. What was changed in the previous iteration and what was learned
 
+    Score reference: 0.5 = equal to reference implementation.
+    Higher is better. 0.9 = ~9x faster than reference.
+
     Learn from past attempts. If the last change made things worse, revert
-    the core approach and try a different strategy. Write the COMPLETE
-    program — you can change anything.
+    the core approach and try a different strategy. If it improved, build on it.
+    Write the COMPLETE program — you can change anything.
     """
 
     task_description = dspy.InputField(
@@ -71,6 +78,9 @@ class ImproveBlockMutation(dspy.Signature):
 class FocusedBlockMutation(dspy.Signature):
     """Improve just the implementation inside the EVOLVE-BLOCK-START/END markers.
 
+    Your goal is to MAXIMIZE the score. Even if the code passes all tests,
+    there is ALWAYS room for improvement — aim for score > 0.90.
+
     You DON'T need to write the full program — only the inner implementation
     that goes BETWEEN the markers. The surrounding code (class, function
     signature, imports, helper methods) is preserved automatically.
@@ -81,8 +91,11 @@ class FocusedBlockMutation(dspy.Signature):
     3. The current implementation inside the EVOLVE-BLOCK
     4. Evaluation feedback and change history
 
-    Make targeted improvements to the inner implementation. Keep the same
-    indentation level as the original block content.
+    Score reference: 0.5 = equal to reference implementation.
+    Higher is better. 0.9 = ~9x faster than reference.
+
+    Make targeted improvements. Try different algorithms, reduce overhead.
+    Keep the same indentation level as the original block content.
     """
 
     task_description = dspy.InputField(

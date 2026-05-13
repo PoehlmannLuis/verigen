@@ -18,11 +18,12 @@ def cli():
     pass
 
 
-def _configure_lm(model: Optional[str], api_base: Optional[str]) -> bool:
+def _configure_lm(model: Optional[str], api_base: Optional[str],
+                 temperature: float = 0.7) -> bool:
     """Configure the DSPy LM. Returns True if successful."""
     import os as _os
 
-    _default_lm_kwargs = dict(max_tokens=8192)
+    _default_lm_kwargs = dict(max_tokens=16384, temperature=temperature)
 
     if model:
         lm_kwargs = {"model": model, **_default_lm_kwargs}
@@ -109,6 +110,8 @@ def _interpret_score(score: float) -> str:
 @click.option("--beam-width", default=3, show_default=True, help="Number of candidates to keep in beam search")
 @click.option("--mutation-mode", type=click.Choice(["full", "focused"]), default="full", show_default=True,
               help="Mutation scope: full (rewrite entire program) or focused (only EVOLVE-BLOCK region)")
+@click.option("--temperature", type=float, default=0.7, show_default=True,
+              help="LLM temperature. Higher = more diverse outputs (good for beam search). 0.0 = deterministic.")
 @click.option("--quiet", "-q", is_flag=True, default=False, help="Suppress live progress output")
 def run(
     task_dir: str,
@@ -121,14 +124,15 @@ def run(
     strategy: str,
     beam_width: int,
     mutation_mode: str,
+    temperature: float,
     quiet: bool,
 ):
     """Run verifiable code generation on a task directory.
 
     TASK_DIR must contain initial.py (with EVOLVE-BLOCK markers) and evaluate.py.
     """
-    # Configure DSPy LM
-    configured = _configure_lm(model, api_base)
+    # Configure DSPy LM with temperature for diversity
+    configured = _configure_lm(model, api_base, temperature=temperature)
     if not configured:
         raise click.Abort()
 
