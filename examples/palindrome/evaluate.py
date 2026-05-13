@@ -7,6 +7,17 @@ import time
 import string
 
 
+_REFERENCE_PALINDROME = """
+def is_palindrome(s):
+    s = ''.join(c.lower() for c in s if c.isalnum())
+    return s == s[::-1]
+"""
+
+_ref_ns = {}
+exec(_REFERENCE_PALINDROME, _ref_ns)
+_REF_FN = _ref_ns["is_palindrome"]
+
+
 def evaluate(code_str: str) -> dict:
     """Test the is_palindrome function and measure its performance.
 
@@ -91,23 +102,33 @@ def evaluate(code_str: str) -> dict:
     for _ in range(n_trials):
         for t in benchmark_strings:
             is_palindrome(t)
-    elapsed = time.perf_counter() - start
     calls = n_trials * len(benchmark_strings)
-    avg_ns = (elapsed / calls) * 1e9  # nanoseconds per call
+    user_elapsed = time.perf_counter() - start
 
-    # Score: 1.0 at 0ns, 0.0 at >=5000ns
-    score = max(0.0, min(1.0, 1.0 - avg_ns / 5000.0))
+    # Reference
+    start = time.perf_counter()
+    for _ in range(n_trials):
+        for t in benchmark_strings:
+            _REF_FN(t)
+    ref_elapsed = time.perf_counter() - start
+
+    speedup = ref_elapsed / user_elapsed if user_elapsed > 0 else 0
+    # Score: sigmoid normalization. 0.5 = equal to reference, no hard ceiling.
+    score = round(speedup / (speedup + 1.0), 6)
 
     return {
-        "score": round(score, 6),
+        "score": score,
         "passed": True,
         "feedback": (
             f"All {len(test_cases)} tests passed. "
-            f"Avg {avg_ns:.1f}ns per call over {calls:,} calls. "
+            f"Speed: {calls/user_elapsed/1000000:.1f}M calls/sec "
+            f"(ref: {calls/ref_elapsed/1000000:.1f}M, ratio: {speedup:.3f}). "
             f"Score: {score:.4f}"
         ),
         "metrics": {
-            "avg_latency_ns": round(avg_ns, 2),
+            "calls_per_sec": round(calls / user_elapsed, 2),
+            "ref_calls_per_sec": round(calls / ref_elapsed, 2),
+            "speed_ratio": round(speedup, 4),
             "n_tests": len(test_cases),
         },
         "artifacts": {},

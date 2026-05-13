@@ -46,37 +46,6 @@ def evaluate(code_str: str) -> dict:
         return {"score": 0.0, "passed": False, "feedback": "game_of_life not defined", "metrics": {}, "artifacts": {}}
 
     # ── Correctness tests ──────────────────────────────────────────
-    def _rle_to_board(rle, R, C):
-        """Parse a simple RLE string into a list-of-lists board."""
-        lines = rle.strip().splitlines()
-        board = [[0] * C for _ in range(R)]
-        r = 0
-        c = 0
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            n = 0
-            for ch in line:
-                if ch.isdigit():
-                    n = n * 10 + int(ch)
-                elif ch == 'b':
-                    c += (n if n else 1)
-                    n = 0
-                elif ch == 'o':
-                    for _ in range(n if n else 1):
-                        board[r][c] = 1
-                        c += 1
-                    n = 0
-                elif ch == '$':
-                    r += (n if n else 1)
-                    c = 0
-                    n = 0
-                elif ch == '!':
-                    break
-        return board
-
-    # Test configurations
     tests = []
 
     # 1: Empty board (all dead)
@@ -245,7 +214,8 @@ def evaluate(code_str: str) -> dict:
     ref_elapsed = time.perf_counter() - t0
 
     speedup = ref_elapsed / user_elapsed if user_elapsed > 0 else 0
-    score = min(speedup, 1.0)
+    # Score: sigmoid normalization. 0.5 = equal to reference, no hard ceiling.
+    score = speedup / (speedup + 1.0)
 
     feedback = (
         f"All {len(tests)} tests passed. "

@@ -1,6 +1,5 @@
 """Evaluation model and sandboxed execution for generated code."""
 
-import atexit
 import json
 import os
 import subprocess
@@ -10,24 +9,6 @@ import textwrap
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Optional, Union
-
-# Track temp code files for cleanup even if the process is killed mid-run.
-# Using a module-level list because atexit doesn't run on SIGKILL.
-_temp_files: list[str] = []
-
-
-def _cleanup_temp_files() -> None:
-    """Remove all tracked temp code files. Registered with atexit."""
-    for path in _temp_files[:]:
-        try:
-            if os.path.exists(path):
-                os.unlink(path)
-                _temp_files.remove(path)
-        except OSError:
-            pass
-
-
-atexit.register(_cleanup_temp_files)
 
 
 @dataclass
@@ -74,14 +55,15 @@ def evaluate_in_sandbox(
 
     try:
         # Write code to a temp file so the subprocess can read it
-        tmp = tempfile.NamedTemporaryFile(
+        tmp_file = tempfile.NamedTemporaryFile(
             mode="w", suffix=".py", delete=False, prefix="verigen_code_",
         )
-        tmp.write(code_str)
-        tmp.flush()
-        code_filename = tmp.name
-        tmp.close()
-        _temp_files.append(code_filename)
+        try:
+            tmp_file.write(code_str)
+            tmp_file.flush()
+            code_filename = tmp_file.name
+        finally:
+            tmp_file.close()
 
         runner = textwrap.dedent(f"""
         import sys, json, os

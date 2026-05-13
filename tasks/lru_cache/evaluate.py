@@ -81,11 +81,12 @@ def evaluate(code_str: str) -> dict:
         assert c.get(2) == 2
     tests.append(("capacity 1", t4))
 
-    # Test 5: capacity 0
+    # Test 5: capacity 0 — no items can be stored
     def t5():
         c = UserCache(0)
         c.put(1, 1)
-        assert c.get(1) == -1
+        result = c.get(1)
+        assert result == -1, f"capacity 0: get(1) should be -1, got {result}"
     tests.append(("capacity 0", t5))
 
     # Test 6: get non-existent
@@ -131,9 +132,11 @@ def evaluate(code_str: str) -> dict:
             c.put(i, i)
         # only last 100 should be present
         for i in range(100):
-            assert c.get(i) == -1, f"old key {i} should be evicted"
+            val = c.get(i)
+            assert val == -1, f"large seq: old key {i} should be evicted, got {val}"
         for i in range(100, 200):
-            assert c.get(i) == i, f"recent key {i} should exist"
+            val = c.get(i)
+            assert val == i, f"large seq: recent key {i} should exist, got {val}"
     tests.append(("large sequential", t10))
 
     # Test 11: alternating read/write
@@ -204,7 +207,9 @@ def evaluate(code_str: str) -> dict:
     ref_elapsed = time.perf_counter() - t0
 
     speedup = ref_elapsed / user_elapsed if user_elapsed > 0 else 0
-    score = min(speedup, 1.0)
+    # Score: sigmoid normalization — never caps. 0.5 = equal to reference.
+    # speedup=0.0 → 0.0, 0.32 → 0.24, 0.5 → 0.33, 1.0 → 0.5, 3.0 → 0.75, 10.0 → 0.91
+    score = speedup / (speedup + 1.0)
 
     feedback = (
         f"All {len(tests)} tests passed. "

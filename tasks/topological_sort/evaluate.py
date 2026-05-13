@@ -176,7 +176,8 @@ def evaluate(code_str: str) -> dict:
     ref_elapsed = time.perf_counter() - t0
 
     speedup = ref_elapsed / user_elapsed if user_elapsed > 0 else 0
-    score = min(speedup, 1.0)
+    # Score: sigmoid normalization. 0.5 = equal to reference, no hard ceiling.
+    score = speedup / (speedup + 1.0)
 
     feedback = (
         f"All {len(graphs)} tests passed. "

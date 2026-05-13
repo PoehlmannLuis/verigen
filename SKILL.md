@@ -141,7 +141,7 @@ def evaluate(code_str: str) -> dict:
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `score` | `float` | ✅ | Higher = better. Continuous metric (latency, accuracy, etc.) |
+| `score` | `float` | ✅ | Higher = better. Use ratio vs reference: `speedup / (speedup + 1)`. 0.5 = equal. |
 | `passed` | `bool` | ✅ | Hard constraint gate. If `False`, candidate is rejected |
 | `feedback` | `str` | ✅ | Description of results, errors, suggestions for the mutator |
 | `metrics` | `dict` | ✅ | Structured metrics for traceability (may be empty) |

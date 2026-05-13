@@ -111,9 +111,9 @@ def evaluate(code_str: str) -> dict:
     ref_elapsed = time.perf_counter() - t0
     ref_cps = (N * len(benchmark_pairs)) / ref_elapsed if ref_elapsed > 0 else float("inf")
 
-    # Score: ratio of our calls/sec to reference, capped at [0, 1]
+    # Score: sigmoid normalization. 0.5 = equal to reference, no hard ceiling.
     raw_ratio = calls_per_sec / ref_cps if ref_cps > 0 else 0
-    score = min(raw_ratio, 1.0)
+    score = raw_ratio / (raw_ratio + 1.0)
 
     feedback = (
         f"All {len(test_cases)} tests passed. "

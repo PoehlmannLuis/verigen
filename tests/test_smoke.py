@@ -160,3 +160,75 @@ def test_trace_logger_to_jsonl():
     # For 2 entries: join produces "line1\nline2" — 1 newline between, 0 trailing
     assert result.count("\n") == 1
     assert not result.endswith("\n\n")
+
+
+def test_trace_entry_diff_field():
+    """TraceEntry supports the diff_from_previous field."""
+    entry = TraceEntry(
+        iteration=0, phase="initial", block_code="def foo(): pass", score=1.0,
+        passed=True, feedback="ok", diff_from_previous="@@ -0,0 +1 @@\n+def foo(): pass",
+    )
+    assert entry.diff_from_previous is not None
+    assert "+def foo(): pass" in entry.diff_from_previous
+
+
+def test_module_compute_diff():
+    """_compute_diff correctly identifies changes between code versions."""
+    from verigen.core.module import _compute_diff, _detect_status
+
+    # No diff for identical code
+    assert _compute_diff("a", "a") == ""
+
+    # Diff for different code
+    diff = _compute_diff("def foo():\n    pass\n", "def foo():\n    return 42\n")
+    assert "+    return 42" in diff
+    assert "-    pass" in diff
+
+
+def test_module_detect_status():
+    """_detect_status correctly identifies early exit."""
+    from verigen.core.module import _detect_status
+
+    # Initial failed
+    logger = TraceLogger()
+    logger.record(TraceEntry(
+        iteration=0, phase="initial", block_code="x",
+        score=0.0, passed=False, feedback="failed",
+    ))
+    status = _detect_status(logger, None, 0, 30)
+    assert status == "initial_failed", f"Expected initial_failed, got {status}"
+
+    # Completed without threshold
+    logger2 = TraceLogger()
+    logger2.record(TraceEntry(
+        iteration=0, phase="initial", block_code="x",
+        score=0.8, passed=True, feedback="ok",
+    ))
+    status = _detect_status(logger2, 0.95, 0, 30)
+    assert status == "completed", f"Expected completed, got {status}"
+
+    # Threshold reached
+    logger3 = TraceLogger()
+    logger3.record(TraceEntry(
+        iteration=0, phase="initial", block_code="x",
+        score=0.96, passed=True, feedback="ok",
+    ))
+    status = _detect_status(logger3, 0.95, 0, 30)
+    assert status == "threshold_reached", f"Expected threshold_reached, got {status}"
+
+    # Near-optimal (score >= 0.85) should be completed, not plateau
+    logger4 = TraceLogger()
+    logger4.record(TraceEntry(
+        iteration=0, phase="initial", block_code="x",
+        score=0.92, passed=True, feedback="ok",
+    ))
+    logger4.record(TraceEntry(
+        iteration=1, phase="mutate", block_code="x",
+        score=0.92, passed=True, feedback="still ok",
+    ))
+    logger4.record(TraceEntry(
+        iteration=2, phase="mutate", block_code="x",
+        score=0.92, passed=True, feedback="still ok",
+    ))
+    status = _detect_status(logger4, None, 0, 30)
+    assert status == "completed", f"Expected completed for near-optimal, got {status}"

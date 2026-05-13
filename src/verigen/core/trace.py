@@ -18,6 +18,7 @@ class TraceEntry:
     metrics: dict[str, float] = field(default_factory=dict)
     change_rationale: Optional[str] = None
     elapsed_ms: Optional[float] = None
+    diff_from_previous: Optional[str] = None
 
 
 class TraceLogger:
@@ -27,6 +28,7 @@ class TraceLogger:
         self.entries: list[TraceEntry] = []
 
     def record(self, entry: TraceEntry) -> None:
+        """Record a trace entry. If there's a previous entry, compute a diff."""
         self.entries.append(entry)
 
     def to_jsonl(self) -> str:

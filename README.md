@@ -116,8 +116,10 @@ def evaluate(code: str) -> dict:
         fn(100)
     avg_us = (time.perf_counter() - t0) / 1000 * 1e6
 
-    # Score: 1.0 at 0µs, 0.0 at ≥100µs — tune to your target
-    score = max(0.0, 1.0 - avg_us / 100.0)
+    # Score: ratio vs reference, normalized via sigmoid.
+    # 0.5 = equal to reference, 0.75 = 3× faster, 0.9 = 9× faster.
+    speedup = ref_elapsed / avg_us if avg_us > 0 else 0
+    score = speedup / (speedup + 1.0)
 
     return {
         "score": score,
@@ -162,28 +164,47 @@ verigen run <task-dir> [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--max-iterations, -n` | 30 | Maximum evolution iterations |
-| `--score-threshold, -t` | — | Early stop when score ≥ threshold (e.g. 0.95) |
-| `--model` | auto-detect | DSPy LM: `openai/gpt-4o`, `ollama_chat/qwen3.6`, `google/gemini-3-pro`, etc. |
+| `--score-threshold, -t` | — | Early stop when score ≥ threshold (e.g. 0.70 = ~2.3× reference) |
+| `--model` | auto: local→env→abort | DSPy LM: `openai/gpt-4o`, `ollama_chat/qwen3.6`, `google/gemini-3-pro`, etc. |
 | `--api-base` | — | API base URL (e.g., `http://localhost:8080/v1`) |
 | `--output, -o` | `<task-dir>/output/` | Output directory |
 | `--timeout` | 30 | Evaluation subprocess timeout (seconds) |
+
+### Live progress
+
+During evolution, the CLI shows per-iteration progress with timing:
+```
+  [  0] initial  ✓ score=0.8463    17614ms  ★
+  [  1] mutate   ✓ score=0.8589    29373ms  ★
+  [  2] mutate   ✓ score=0.6394    31704ms
+  [  3] mutate   ✓ score=0.9528    46124ms  ★
+```
+A `★` marks a new best. Final status is one of:
+- `completed` — all iterations ran
+- `threshold_reached` — hit score threshold
+- `plateau` — no improvement in recent iterations (try refining `program.md`)
+- `initial_failed` — initial generation failed tests
 
 ### Output artifacts
 
 ```
 <output-dir>/
 ├── best_program.py      # Final generated code
-├── summary.json          # score, n_iterations, feedback, metrics
-└── trace.jsonl          # One JSON object per iteration
+├── summary.json          # score, status, n_iterations, metrics, feedback
+└── trace.jsonl          # One JSON object per iteration (includes diff_from_previous)
 ```
 
 ### LLM Configuration
 
-DSPy handles all providers. The CLI auto-detects a local `llama-server` at `http://localhost:8080/v1`. Override with `--model` and `--api-base`:
+DSPy handles all providers. The CLI auto-detects in this order:
+1. `--model` / `--api-base` flags
+2. Local `llama-server` at `http://localhost:8080/v1`
+3. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` env vars
 
 ```bash
 verigen run . --model openai/gpt-4o
 verigen run . --model openai/qwen3.6 --api-base http://localhost:8080/v1
+export OPENAI_API_KEY="sk-..." && verigen run .
 ```
 
 Works with OpenAI, Anthropic, Google, Ollama, llama.cpp, vLLM.
@@ -198,7 +219,6 @@ Works with OpenAI, Anthropic, Google, Ollama, llama.cpp, vLLM.
 | `tasks/game_of_life/` | Matrix computation | Medium | Padding vs vectorized |
 | `tasks/levenshtein/` | DP algorithm | Medium | 2D → 1D row optimization |
 | `tasks/lru_cache/` | Data structure | Medium | OrderedDict → doubly-linked list |
-| `tasks/regex_match/` | Recursive → DP | Hard | Backtracking traps, DP table |
 | `tasks/topological_sort/` | Graph algorithm | Medium | Kahn's vs DFS optimization |
 
 ---
@@ -271,18 +291,21 @@ VERIGEN_TEST_LLM=1 python -m pytest tests/test_integration.py -v
 
 ## Project Status
 
-**v0.1.1** — patch with bug fixes.
+**v0.2.0** — program.md context now reaches the LLM, sigmoid score normalization, live progress, plateau detection, diff-in-trace, env-var auto-detect.
 
 | Area | Status |
 |------|--------|
 | Single-thread evolution | ✅ |
 | Python subprocess sandbox | ✅ (process isolation, not container) |
-| DSPy integration | ✅ |
+| Full program.md context passed to LLM | ✅ |
+| Change history feedback loop | ✅ |
+| Live progress during evolution | ✅ |
+| Plateau detection + actionable tips | ✅ |
+| Diff in trace entries | ✅ |
+| Sigmoid score normalization (no ceiling) | ✅ |
+| Env var auto-detect (OpenAI/Anthropic/Google) | ✅ |
 | CLI | ✅ |
 | pi Skill | ✅ |
-| Early exit on failed init | ✅ (new) |
-| Full-code trace (not block-only) | ✅ (new) |
-| Temp file cleanup | ✅ (new) |
-| Population/parallel evaluation | 🔜 v0.2 |
-| Docker sandboxing | 🔜 v0.2 |
-| DSPy MIPROv2 meta-optimization | 🔜 v0.2 |
+| Population/parallel evaluation | 🔜 v0.3 |
+| Docker sandboxing | 🔜 v0.3 |
+| DSPy MIPROv2 meta-optimization | 🔜 v0.3 |

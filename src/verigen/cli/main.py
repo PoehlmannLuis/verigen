@@ -17,6 +17,71 @@ def cli():
     pass
 
 
+def _configure_lm(model: Optional[str], api_base: Optional[str]) -> bool:
+    """Configure the DSPy LM. Returns True if successful."""
+    import os as _os
+
+    _default_lm_kwargs = dict(max_tokens=8192)
+
+    # Explicit model wins
+    if model:
+        lm_kwargs = {"model": model, **_default_lm_kwargs}
+        if api_base:
+            lm_kwargs["api_base"] = api_base.rstrip("/")
+        if "ollama" in model or "localhost" in (api_base or ""):
+            lm_kwargs.setdefault("api_key", "not-needed")
+        dspy.configure(lm=dspy.LM(**lm_kwargs))
+        click.echo(f"✓ Using model: {model}")
+        return True
+
+    # API base without model
+    if api_base:
+        dspy.configure(lm=dspy.LM(
+            model="openai/qwen3.6",
+            api_base=api_base.rstrip("/"),
+            api_key="not-needed",
+            **_default_lm_kwargs,
+        ))
+        click.echo(f"✓ Using API base: {api_base}")
+        return True
+
+    # Try auto-detect: local llama-server first, then env vars
+    import urllib.request
+    try:
+        urllib.request.urlopen("http://localhost:8080/v1/models", timeout=2)
+        dspy.configure(lm=dspy.LM(
+            model="openai/qwen3.6",
+            api_base="http://localhost:8080/v1",
+            api_key="not-needed",
+            **_default_lm_kwargs,
+        ))
+        click.echo("✓ Using local llama-server at http://localhost:8080/v1")
+        return True
+    except Exception:
+        pass
+
+    # Check environment variables for common providers
+    if _os.environ.get("OPENAI_API_KEY"):
+        dspy.configure(lm=dspy.LM(model="openai/gpt-4o", **_default_lm_kwargs))
+        click.echo("✓ Using OPENAI_API_KEY from environment")
+        return True
+    if _os.environ.get("ANTHROPIC_API_KEY"):
+        dspy.configure(lm=dspy.LM(model="anthropic/claude-sonnet-4", **_default_lm_kwargs))
+        click.echo("✓ Using ANTHROPIC_API_KEY from environment")
+        return True
+    if _os.environ.get("GOOGLE_API_KEY"):
+        dspy.configure(lm=dspy.LM(model="google/gemini-3-pro", **_default_lm_kwargs))
+        click.echo("✓ Using GOOGLE_API_KEY from environment")
+        return True
+
+    click.echo("No LLM configured. Options:", err=True)
+    click.echo("  --model openai/gpt-4o --api-base https://api.openai.com/v1    (with env OPENAI_API_KEY)", err=True)
+    click.echo("  --model ollama_chat/qwen3.6                                    (local Ollama)", err=True)
+    click.echo("  --api-base http://localhost:8080/v1                             (local llama-server)", err=True)
+    click.echo("  export OPENAI_API_KEY=... && verigen run <task>", err=True)
+    return False
+
+
 @cli.command()
 @click.argument("task_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--max-iterations", "-n", default=30, show_default=True, help="Maximum evolution iterations")
@@ -39,35 +104,9 @@ def run(
     TASK_DIR must contain initial.py (with EVOLVE-BLOCK markers) and evaluate.py.
     """
     # Configure DSPy LM
-    _default_lm_kwargs = dict(max_tokens=8192)
-    if model:
-        lm_kwargs = {"model": model, **_default_lm_kwargs}
-        if api_base:
-            lm_kwargs["api_base"] = api_base
-        if "ollama" in model or "localhost" in (api_base or ""):
-            lm_kwargs.setdefault("api_key", "not-needed")
-        dspy.configure(lm=dspy.LM(**lm_kwargs))
-    elif api_base:
-        dspy.configure(lm=dspy.LM(
-            model="openai/qwen3.6",
-            api_base=api_base,
-            api_key="not-needed",
-            **_default_lm_kwargs,
-        ))
-    else:
-        import urllib.request
-        try:
-            urllib.request.urlopen("http://localhost:8080/v1/models", timeout=2)
-            dspy.configure(lm=dspy.LM(
-                model="openai/qwen3.6",
-                api_base="http://localhost:8080/v1",
-                api_key="not-needed",
-                **_default_lm_kwargs,
-            ))
-            click.echo("✓ Using local llama-server at http://localhost:8080/v1")
-        except Exception:
-            click.echo("No model configured. Use --model and/or --api-base, or configure dspy.settings.lm.", err=True)
-            raise click.Abort()
+    configured = _configure_lm(model, api_base)
+    if not configured:
+        raise click.Abort()
 
     # Load task
     click.echo(f"Loading task from {task_dir}...")
@@ -76,18 +115,39 @@ def run(
     click.echo(f"  Template: {len(task.template)} chars")
     click.echo()
 
-    # Run
+    # Run with live progress
     click.echo(f"Running evolution (max {max_iterations} iterations)...")
+    click.echo()
+
+    best_so_far = 0.0
+    best_iter = 0
+
+    def _on_iteration(iteration, phase, score, passed, elapsed_ms, is_best):
+        nonlocal best_so_far, best_iter
+        badge = "✓" if passed else "✗"
+        is_new_best = "★" if is_best else " "
+        if is_best:
+            best_so_far = score
+            best_iter = iteration
+        click.echo(f"  [{iteration:3d}] {phase:7s} {badge} score={score:.4f}  {elapsed_ms:7.0f}ms  {is_new_best}")
+
     gen = VerifiableCodeGen(
         max_iterations=max_iterations,
         score_threshold=score_threshold,
+        on_iteration=_on_iteration,
     )
     result = gen(task)
 
     # Report
     click.echo()
-    click.echo(f"✓ Done after {result.n_iterations} iterations")
-    click.echo(f"  Best score: {result.best_score:.4f}")
+    status_label = {
+        "threshold_reached": "✓ Threshold reached",
+        "completed": "✓ Completed all iterations",
+        "plateau": "∼ Plateau (no improvement in recent iterations)",
+        "initial_failed": "✗ Initial generation failed hard constraints",
+    }.get(result.status, result.status)
+    click.echo(f"  Status: {status_label}")
+    click.echo(f"  Best score: {result.best_score:.4f} (at iteration {best_iter})")
     click.echo(f"  Best feedback: {result.best_feedback[:200]}")
     click.echo()
 
@@ -107,10 +167,12 @@ def run(
     result.trace.save(trace_path)
     click.echo(f"  Saved: {trace_path}")
 
-    # Summary
+    # Summary with plateau info
     summary = {
         "score": result.best_score,
+        "status": result.status,
         "n_iterations": result.n_iterations,
+        "best_iteration": best_iter,
         "feedback": result.best_feedback,
         "metrics": result.best_metrics,
         "code_path": str(code_path),
@@ -121,8 +183,17 @@ def run(
     click.echo(f"  Saved: {summary_path}")
     click.echo()
 
+    if result.status == "plateau":
+        click.echo("  Tip: Score plateaued. Try tweaking program.md with specific optimization")
+        click.echo("  hints, or run with --max-iterations for more attempts.")
+    elif result.status == "initial_failed":
+        click.echo("  Tip: The initial generation failed tests. Check the evaluator's test cases")
+        click.echo("  and the LLM output in trace.jsonl. Tighten program.md instructions.")
+    click.echo()
+
     # Print iteration summary
     click.echo("Iteration history:")
     for entry in result.trace.entries:
         badge = "✓" if entry.passed else "✗"
-        click.echo(f"  [{entry.iteration:3d}] {entry.phase:7s} {badge} score={entry.score:.4f}  {entry.feedback[:80]}")
+        ms = f"{entry.elapsed_ms:7.0f}ms" if entry.elapsed_ms else ""
+        click.echo(f"  [{entry.iteration:3d}] {entry.phase:7s} {badge} score={entry.score:.4f}  {ms}  {entry.feedback[:60]}")

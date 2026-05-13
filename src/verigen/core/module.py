@@ -1,5 +1,6 @@
 """VerifiableCodeGen: a DSPy-native module for evolutionary code optimization."""
 
+import difflib
 import time
 from typing import Callable, Optional
 
@@ -31,10 +32,12 @@ class VerifiableCodeGen(dspy.Module):
         self,
         max_iterations: int = 50,
         score_threshold: Optional[float] = None,
+        on_iteration: Optional[Callable] = None,
     ):
         super().__init__()
         self.max_iterations = max_iterations
         self.score_threshold = score_threshold
+        self.on_iteration = on_iteration
         self.generator = dspy.ChainOfThought(GenerateInitialBlock)
         self.improver = dspy.ChainOfThought(ImproveBlockMutation)
         self.trace = TraceLogger()
@@ -61,6 +64,7 @@ class VerifiableCodeGen(dspy.Module):
         try:
             output = self.generator(
                 task_description=task.description,
+                task_context=task.program_context,
                 program_template=template,
             )
             best_code = output.generated_code.strip()
@@ -70,16 +74,29 @@ class VerifiableCodeGen(dspy.Module):
 
         best_result = task.evaluate_fn(best_code)
 
-        self.trace.record(TraceEntry(
+        prev_code_for_diff = template
+
+        initial_entry = TraceEntry(
             iteration=0,
             phase="initial",
-            block_code=best_code,  # store full code for reproducibility
+            block_code=best_code,
             score=best_result.score,
             passed=best_result.passed,
             feedback=best_result.feedback,
             metrics=best_result.metrics,
+            change_rationale=None,
             elapsed_ms=elapsed,
-        ))
+            diff_from_previous=_compute_diff(prev_code_for_diff, best_code),
+        )
+        self.trace.record(initial_entry)
+        prev_code_for_diff = best_code
+
+        if self.on_iteration:
+            self.on_iteration(
+                iteration=0, phase="initial", score=best_result.score,
+                passed=best_result.passed, elapsed_ms=elapsed,
+                is_best=True,
+            )
 
         # Early exit: if the initial generation fails to pass constraints,
         # mutating from it rarely produces working code. Stop immediately.
@@ -91,25 +108,31 @@ class VerifiableCodeGen(dspy.Module):
                 best_metrics=best_result.metrics,
                 n_iterations=len(self.trace.entries),
                 trace=self.trace,
+                status="initial_failed",
             )
 
         # ── Phase 2: Evolutionary improvement ────────────────────────
+        last_improvement_iter = 0
+        previous_rationale = ""
+
         for i in range(self.max_iterations):
             t0 = time.perf_counter()
 
             try:
                 mutation = self.improver(
                     task_description=task.description,
-                    program_context=template,
+                    task_context=task.program_context,
+                    program_template=template,
                     current_code=best_code,
                     evaluation_feedback=_format_feedback(best_result, i),
+                    change_history=previous_rationale,
                 )
                 candidate_code = mutation.generated_code.strip()
                 candidate_rationale = mutation.change_rationale.strip()
             except AdapterParseError:
                 # Skip this iteration if the LLM response couldn't be parsed
                 candidate_code = best_code
-                candidate_rationale = ""
+                candidate_rationale = previous_rationale
 
             if not candidate_code:
                 candidate_code = best_code
@@ -117,6 +140,8 @@ class VerifiableCodeGen(dspy.Module):
             candidate_result = task.evaluate_fn(candidate_code)
             elapsed = (time.perf_counter() - t0) * 1000
 
+            # Build the trace entry with diff from previous best
+            entry_diff = _compute_diff(prev_code_for_diff, candidate_code)
             self.trace.record(TraceEntry(
                 iteration=i + 1,
                 phase="mutate",
@@ -127,16 +152,37 @@ class VerifiableCodeGen(dspy.Module):
                 metrics=candidate_result.metrics,
                 change_rationale=candidate_rationale,
                 elapsed_ms=elapsed,
+                diff_from_previous=entry_diff,
             ))
 
             # Keep candidate if it passes and improves score
+            improved = False
             if candidate_result.passed and candidate_result.score > best_result.score:
+                improved = True
                 best_code = candidate_code
                 best_result = candidate_result
+                last_improvement_iter = i + 1
+                prev_code_for_diff = best_code
+
+            previous_rationale = candidate_rationale
+
+            if self.on_iteration:
+                self.on_iteration(
+                    iteration=i + 1, phase="mutate",
+                    score=candidate_result.score,
+                    passed=candidate_result.passed,
+                    elapsed_ms=elapsed,
+                    is_best=improved,
+                )
 
             # Early stop at threshold
             if self.score_threshold is not None and best_result.score >= self.score_threshold:
                 break
+
+        # Determine status
+        status = _detect_status(
+            self.trace, self.score_threshold, last_improvement_iter, self.max_iterations
+        )
 
         return dspy.Prediction(
             best_code=best_code,
@@ -145,6 +191,7 @@ class VerifiableCodeGen(dspy.Module):
             best_metrics=best_result.metrics,
             n_iterations=len(self.trace.entries),
             trace=self.trace,
+            status=status,
         )
 
 
@@ -157,3 +204,37 @@ def _format_feedback(result: EvaluationResult, iteration: int) -> str:
         metrics_str = ", ".join(f"{k}={v:.4f}" for k, v in result.metrics.items())
         lines.append(f"  Metrics: {metrics_str}")
     return "\n".join(lines)
+
+
+def _compute_diff(old_code: str, new_code: str) -> str:
+    """Compute a compact unified diff between two code strings."""
+    if old_code == new_code:
+        return ""
+    diff = difflib.unified_diff(
+        old_code.splitlines(keepends=True),
+        new_code.splitlines(keepends=True),
+        fromfile="previous", tofile="current", n=3,
+    )
+    return "".join(diff)
+
+
+def _detect_status(
+    trace: TraceLogger,
+    threshold: Optional[float],
+    last_improvement_iter: int,
+    max_iters: int,
+) -> str:
+    """Detect the run status based on the trace history."""
+    if not trace.entries:
+        return "empty"
+    if trace.entries[0].phase == "initial" and not trace.entries[0].passed:
+        return "initial_failed"
+    if threshold is not None and trace.best_score >= threshold:
+        return "threshold_reached"
+    # Near-optimal: score >= 0.85 means ~6x faster than reference — not a plateau
+    if trace.best_score >= 0.85:
+        return "completed"
+    # Plateau: no improvement in the last half of iterations (need ≥ 4 entries)
+    if len(trace.entries) >= 4 and last_improvement_iter < len(trace.entries) - 2:
+        return "plateau"
+    return "completed"
